@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include <complex.h>
 #include <fftw3.h>
 
 #ifndef M_PI
@@ -324,19 +325,17 @@ struct SYNC
 void sync(fftwf_complex *signal, float *map, struct SYNC *list)
 {
   int i, j, k, l, m, n, jmax;
-  float sum[2], s, smax;
-  float w[NSPS];
+  float w[NSPS], sum[2], s, smax;
+  fftwf_complex *in, *out;
+  fftwf_plan p;
 
   for(i = 0; i < NSPS; ++i)
   {
     w[i] = sinf(M_PI * i / (NSPS - 1));
   }
 
-  fftwf_complex *in;
-  fftwf_complex *out;
-  fftwf_plan p;
-  in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * NFFT);
-  out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * NFFT);
+  in = fftwf_alloc_complex(NFFT);
+  out = fftwf_alloc_complex(NFFT);
   p = fftwf_plan_dft_1d(NFFT, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
 
   memset(in, 0, sizeof(fftwf_complex) * NFFT);
@@ -345,8 +344,7 @@ void sync(fftwf_complex *signal, float *map, struct SYNC *list)
   {
     for(j = 0; j < NSPS; ++j)
     {
-      in[j][0] = w[j] * signal[i * NSTP + j][0];
-      in[j][1] = w[j] * signal[i * NSTP + j][1];
+      in[j] = w[j] * signal[i * NSTP + j];
     }
 
     fftwf_execute(p);
@@ -354,7 +352,7 @@ void sync(fftwf_complex *signal, float *map, struct SYNC *list)
     for(j = 0; j < NFFT; ++j)
     {
       k = j < NFFT / 2 ? j + NFFT / 2 : j - NFFT / 2;
-      map[i * NFFT + k] = out[j][0] * out[j][0] + out[j][1] * out[j][1];
+      map[i * NFFT + k] = out[j] * conjf(out[j]);
     }
   }
 
