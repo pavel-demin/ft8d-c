@@ -15,7 +15,8 @@ typedef float real_t;
 struct SYNC
 {
   int i, j;
-  real_t *p, s;
+  real_t s;
+  real_t *p;
 };
 
 typedef struct SYNC sync_t;
@@ -27,14 +28,14 @@ typedef struct SYNC sync_t;
 #define N 174
 #define M 83
 
-#define NSTP 160
-#define NSPS 640
-#define NFFT 1280
+#define NSTP 128
+#define NSPS 1600
+#define NFFT 3200
 
-#define NSYM 372
+#define NSSY 5
+#define NFOS 5
 
-#define NSSY 4
-#define NFOS 2
+#define NSYM (93 * NSSY)
 
 #define NTOKENS 2063592
 #define MAX22 4194304
@@ -328,26 +329,24 @@ char c2[36] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 char c3[10] = "0123456789";
 char c4[27] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+complex_t *signal;
+real_t window[NSPS], *map, llr[N];
+sync_t *list;
+uint8_t message[N];
+
 complex_t *in, *out;
 PFFFT_Setup *setup;
 
-void sync(complex_t *signal, real_t *map, sync_t *list)
+void sync()
 {
-  int i, j, k, l, m, n, jmax;
-  real_t w[NSPS], sum[2], s, smax;
-
-  for(i = 0; i < NSPS; ++i)
-  {
-    w[i] = sinf(M_PI * i / (NSPS - 1));
-  }
-
-  memset(in, 0, sizeof(complex_t) * NFFT);
+  int i, j, k, m, n, jmax;
+  real_t sum[2], s, smax;
 
   for(i = 0; i < NSYM; ++i)
   {
     for(j = 0; j < NSPS; ++j)
     {
-      in[j] = w[j] * signal[i * NSTP + j];
+      in[j] = window[j] * signal[i * NSTP + j];
     }
 
     pffft_transform_ordered(setup, in, out, NULL, PFFFT_FORWARD);
@@ -355,46 +354,42 @@ void sync(complex_t *signal, real_t *map, sync_t *list)
     for(j = 0; j < NFFT; ++j)
     {
       k = j < NFFT / 2 ? j + NFFT / 2 : j - NFFT / 2;
-      map[i * NFFT + k] = out[j] * conjf(out[j]);
+      map[i * NFFT + k] = cabsf(out[j]);
     }
   }
 
-  for(i = 128; i < 1153; ++i)
+  for(i = 0; i < NFFT; ++i)
   {
-    smax = 0;
     jmax = 0;
-    for(j = -50; j < 75; ++j)
+    smax = 0;
+    for(j = -7 * NSSY; j < 21 * NSSY; ++j)
     {
       memset(sum, 0, sizeof(sum));
       for(k = 0; k < 7; ++k)
       {
-        m = j + NSSY * k;
-        for(l = 0; l < 3; ++l)
-        {
-          if(m < 0) continue;
-          if(m >= NSYM) break;
-          for(n = 0; n < 8; ++n) sum[0] += map[m * NFFT + i + NFOS * n];
-          sum[1] += map[m * NFFT + i + NFOS * costas[k]];
-          m += NSSY * 36;
-        }
+        m = j + (k + 36) * NSSY;
+        for(n = 0; n < 8; ++n) sum[0] += map[m * NFFT + i + n * NFOS];
+        sum[1] += map[m * NFFT + i + costas[k] * NFOS];
       }
       s = 7 * sum[1] / (sum[0] - sum[1]);
       if(smax < s)
       {
-        smax = s;
         jmax = j;
+        smax = s;
       }
     }
-    list[i - 128].i = i;
-    list[i - 128].j = jmax;
-    list[i - 128].p = map + jmax * NFFT + i;
-    list[i - 128].s = smax;
+    list[i].i = i;
+    list[i].j = jmax;
+    list[i].s = smax;
+    list[i].p = map + jmax * NFFT + i;
   }
 
-  for(i = 1; i < 1025; ++i)
+  for(i = 2; i < NFFT - 2; ++i)
   {
-    if(list[i - 1].s > list[i].s) list[i].s = 0;
-    else list[i - 1].s = 0;
+    if((list[i - 2].s > list[i].s && list[i - 1].s > list[i].s) || (list[i + 1].s > list[i].s && list[i + 2].s > list[i].s))
+    {
+      list[i].p = NULL;
+    }
   }
 }
 
@@ -406,7 +401,7 @@ real_t max(real_t a, real_t b, real_t c, real_t d)
   return x > y ? x : y;
 }
 
-void process(sync_t *cand, real_t *llr)
+void process(sync_t *cand)
 {
   int i, j, k, l;
   real_t s[8], sum[2], var, sig;
@@ -419,7 +414,7 @@ void process(sync_t *cand, real_t *llr)
 
       for(l = 0; l < 8; ++l)
       {
-        s[l] = logf(1e-32 + cand->p[k + NFOS * graymap[l]]);
+        s[l] = log10f(1e-32 + cand->p[k + graymap[l] * NFOS]);
       }
 
       k = i * 87 + j * 3;
@@ -437,7 +432,7 @@ void process(sync_t *cand, real_t *llr)
     sum[1] += llr[i] * llr[i];
   }
   var = (sum[1] - sum[0] * sum[0] / N) / N;
-  sig = var > 0 ? sqrtf(var) : sqrtf(sum[1]);
+  sig = var > 0 ? sqrtf(var) : sqrtf(sum[1] / N);
   sig /= 4;
 
   for(i = 0; i < N; ++i)
@@ -446,7 +441,7 @@ void process(sync_t *cand, real_t *llr)
   }
 }
 
-int check(uint8_t *message)
+int check()
 {
   int i, j;
   uint8_t poly[15] = {1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1 };
@@ -473,10 +468,10 @@ int check(uint8_t *message)
   return 1;
 }
 
-int decode(real_t *llr, int iterations, uint8_t *message)
+int decode(int iterations)
 {
   int i, j, k, l, iter, ibj, ichk, current, previous, counter;
-  real_t x, x2, tmn, tov[N][3], toc[M][7], zn[N];
+  real_t x, x2, tnm, tmn, tov[N][3], toc[M][7], zn[N];
 
   memset(tov, 0, sizeof(tov));
 
@@ -507,12 +502,12 @@ int decode(real_t *llr, int iterations, uint8_t *message)
       if(l % 2 > 0) ++current;
     }
 
-    if(current == 0 && check(message)) return 1;
+    if(current == 0 && check()) return 1;
 
     if(iter > 0)
     {
-      if(current < previous) counter = 0;
       ++counter;
+      if(current < previous) counter = 0;
       if(counter > 4 && iter > 9 && current > 15) return 0;
     }
 
@@ -523,22 +518,15 @@ int decode(real_t *llr, int iterations, uint8_t *message)
       for(j = 0; j < nrw[i]; ++j)
       {
         ibj = nm[i][j];
-        toc[i][j] = zn[ibj];
+        tnm = llr[ibj];
         for(k = 0; k < ncw; ++k)
         {
-          if(mn[ibj][k] == i)
+          if(mn[ibj][k] != i)
           {
-            toc[i][j] -= tov[ibj][k];
+            tnm += tov[ibj][k];
           }
         }
-      }
-    }
-
-    for(i = 0; i < M; ++i)
-    {
-      for(j = 0; j < nrw[i]; ++j)
-      {
-        x = -toc[i][j] / 2;
+        x = -tnm / 2;
         x2 = x * x;
         toc[i][j] = x > 3.64 ? 1 : x < -3.64 ? -1 : (945 + (105 + x2) * x2) * x / (945 + (420 + 15 * x2) * x2);
       }
@@ -578,7 +566,7 @@ void trim(char *s)
   memmove(s, p, l + 1);
 }
 
-int unpack(uint8_t *message, char *call, char *grid)
+int unpack(char *call, char *grid)
 {
   int i, n;
   uint64_t icall;
@@ -656,16 +644,7 @@ int unpack(uint8_t *message, char *call, char *grid)
 
 int snr(sync_t *cand)
 {
-  int i;
-  real_t signal = 0, noise = 0;
-
-  for(i = 0; i < 7; ++i)
-  {
-    signal += cand->p[(i + 36) * NSSY * NFFT + NFOS * costas[i]];
-    noise += cand->p[(i + 36) * NSSY * NFFT + NFOS * ((costas[i] + 4) % 8)];
-  }
-
-  return floor(10.0 * log10f(1e-32 + signal / noise) - 27 + 0.5);
+  return floor(20.0 * log10f(1e-32 + cand->s) - 26 + 0.5);
 }
 
 int main(int argc, char **argv)
@@ -673,11 +652,9 @@ int main(int argc, char **argv)
   FILE *fp;
   double dialfreq;
   int i, j, freq;
-  complex_t signal[60000];
-  real_t map[NSYM * NFFT], llr[N];
-  sync_t *cand, list[1025];
-  uint8_t message[N];
-  char call[7], grid[5];
+  sync_t *curr, *next, temp;
+  char call[12], grid[5];
+  real_t a[4] = {0.35875, 0.48829, 0.14128, 0.01168};
 
   if(argc != 2)
   {
@@ -690,9 +667,23 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
+  signal = malloc(sizeof(complex_t) * 60000);
+  map = malloc(sizeof(real_t) * NSYM * NFFT);
+  list = malloc(sizeof(sync_t) * NFFT);
+
   in = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
   out = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
   setup = pffft_new_setup(NFFT, PFFFT_COMPLEX);
+
+  for(i = 0; i < NSPS; ++i)
+  {
+    window[i] = a[0] -
+      a[1] * cosf(2.0 * M_PI * i / (NSPS - 1)) +
+      a[2] * cosf(4.0 * M_PI * i / (NSPS - 1)) -
+      a[3] * cosf(6.0 * M_PI * i / (NSPS - 1));
+  }
+
+  memset(in, 0, sizeof(complex_t) * NFFT);
 
   fread(&dialfreq, 1, 8, fp);
 
@@ -700,22 +691,30 @@ int main(int argc, char **argv)
   {
     fread(signal, 1, 480000, fp);
 
-    sync(signal, map, list);
+    sync();
 
-    for(j = 0; j < 1025; ++j)
+    for(j = 2; j < NFFT - 2; ++j)
     {
-      cand = &list[j];
+      curr = &list[j];
+      next = &list[j + 1];
 
-      if(cand->s < 1.5) continue;
+      if(curr->p == NULL || curr->s < 3.0) continue;
 
-      freq = floor(dialfreq + j * 3.125 - 1600 + 0.5);
-
-      process(cand, llr);
-
-      if(decode(llr, 30, message) && unpack(message, call, grid))
+      if(next->p != NULL && next->s > curr->s)
       {
-        printf("%1d %4d %4d %5.2f %3d %8d %6s %4s\n", i, cand->i, cand->j, cand->s, snr(cand), freq, call, grid);
+        temp = *curr;
+        *curr = *next;
+        *next = temp;
       }
+
+      process(curr);
+
+      if(!decode(30) || !unpack(call, grid)) continue;
+
+      next->p = NULL;
+
+      freq = floor(dialfreq + j * 4.0e3 / NFFT - 2000 + 0.5);
+      printf("%1d %4d %4d %5.2f %3d %8d %6s %4s\n", i, curr->i, curr->j, curr->s, snr(curr), freq, call, grid);
     }
   }
 
