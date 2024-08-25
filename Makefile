@@ -6,7 +6,7 @@ CC = gcc
 LD = gcc
 RM = rm -f
 
-CFLAGS = -O3 -Wall
+CFLAGS = -Wall -O3 -funroll-loops -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard -ffast-math -fsingle-precision-constant -mvectorize-with-neon-quad
 LDFLAGS = -lm
 
 all: $(TARGET)
