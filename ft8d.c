@@ -5,9 +5,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-
 #include <complex.h>
-#include <fftw3.h>
+
+#include "pffft.h"
+
+typedef float complex complex_t;
+typedef float real_t;
+
+struct SYNC
+{
+  int i, j;
+  real_t *p, s;
+};
+
+typedef struct SYNC sync_t;
 
 #ifndef M_PI
 #define M_PI (3.14159265358979323846)
@@ -316,29 +327,20 @@ char c2[36] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 char c3[10] = "0123456789";
 char c4[27] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-struct SYNC
-{
-  int i, j;
-  float *p, s;
-};
+complex_t *in, *out;
+PFFFT_Setup *setup;
 
-void sync(fftwf_complex *signal, float *map, struct SYNC *list)
+void sync(complex_t *signal, real_t *map, sync_t *list)
 {
   int i, j, k, l, m, n, jmax;
-  float w[NSPS], sum[2], s, smax;
-  fftwf_complex *in, *out;
-  fftwf_plan p;
+  real_t w[NSPS], sum[2], s, smax;
 
   for(i = 0; i < NSPS; ++i)
   {
     w[i] = sinf(M_PI * i / (NSPS - 1));
   }
 
-  in = fftwf_alloc_complex(NFFT);
-  out = fftwf_alloc_complex(NFFT);
-  p = fftwf_plan_dft_1d(NFFT, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-
-  memset(in, 0, sizeof(fftwf_complex) * NFFT);
+  memset(in, 0, sizeof(complex_t) * NFFT);
 
   for(i = 0; i < NSYM; ++i)
   {
@@ -347,7 +349,7 @@ void sync(fftwf_complex *signal, float *map, struct SYNC *list)
       in[j] = w[j] * signal[i * NSTP + j];
     }
 
-    fftwf_execute(p);
+    pffft_transform_ordered(setup, in, out, NULL, PFFFT_FORWARD);
 
     for(j = 0; j < NFFT; ++j)
     {
@@ -355,10 +357,6 @@ void sync(fftwf_complex *signal, float *map, struct SYNC *list)
       map[i * NFFT + k] = out[j] * conjf(out[j]);
     }
   }
-
-  fftwf_destroy_plan(p);
-  fftwf_free(in);
-  fftwf_free(out);
 
   for(i = 128; i < 1153; ++i)
   {
@@ -399,18 +397,18 @@ void sync(fftwf_complex *signal, float *map, struct SYNC *list)
   }
 }
 
-float max(float a, float b, float c, float d)
+real_t max(real_t a, real_t b, real_t c, real_t d)
 {
-  float x, y;
+  real_t x, y;
   x = a > b ? a : b;
   y = c > d ? c : d;
   return x > y ? x : y;
 }
 
-void process(struct SYNC *cand, float *llr)
+void process(sync_t *cand, real_t *llr)
 {
   int i, j, k, l;
-  float s[8], sum[2], var, sig;
+  real_t s[8], sum[2], var, sig;
 
   for(i = 0; i < 2; ++i)
   {
@@ -474,10 +472,10 @@ int check(uint8_t *message)
   return 1;
 }
 
-int decode(float *llr, int iterations, uint8_t *message)
+int decode(real_t *llr, int iterations, uint8_t *message)
 {
   int i, j, k, l, iter, ibj, ichk, current, previous, counter;
-  float x, x2, tmn, tov[N][3], toc[M][7], zn[N];
+  real_t x, x2, tmn, tov[N][3], toc[M][7], zn[N];
 
   memset(tov, 0, sizeof(tov));
 
@@ -636,10 +634,10 @@ int unpack(uint8_t *message, char *call, char *grid)
   return 0;
 }
 
-int snr(struct SYNC *cand)
+int snr(sync_t *cand)
 {
   int i;
-  float signal = 0, noise = 0;
+  real_t signal = 0, noise = 0;
 
   for(i = 0; i < 7; ++i)
   {
@@ -655,9 +653,9 @@ int main(int argc, char **argv)
   FILE *fp;
   double dialfreq;
   int i, j, freq;
-  fftwf_complex signal[60000];
-  float map[NSYM * NFFT], llr[N];
-  struct SYNC *cand, list[1025];
+  complex_t signal[60000];
+  real_t map[NSYM * NFFT], llr[N];
+  sync_t *cand, list[1025];
   uint8_t message[N];
   char call[7], grid[5];
 
@@ -671,6 +669,10 @@ int main(int argc, char **argv)
     fprintf(stderr, "Cannot open input file %s.\n", argv[1]);
     return EXIT_FAILURE;
   }
+
+  in = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
+  out = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
+  setup = pffft_new_setup(NFFT, PFFFT_COMPLEX);
 
   fread(&dialfreq, 1, 8, fp);
 

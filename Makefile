@@ -1,13 +1,13 @@
 TARGET = ft8d
 
-OBJECTS = ft8d.o
+OBJECTS = pffft.o ft8d.o
 
 CC = gcc
 LD = gcc
 RM = rm -f
 
 CFLAGS = -O3 -Wall
-LDFLAGS = -lfftw3f -lm
+LDFLAGS = -lm
 
 all: $(TARGET)
 
