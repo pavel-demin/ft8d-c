@@ -322,6 +322,7 @@ int costas[7] = {3, 1, 4, 0, 6, 5, 2};
 
 int graymap[8] = {0, 1, 3, 2, 5, 6, 4, 7};
 
+char c0[38] = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
 char c1[37] = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 char c2[36] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 char c3[10] = "0123456789";
@@ -580,9 +581,9 @@ void trim(char *s)
 int unpack(uint8_t *message, char *call, char *grid)
 {
   int i, n;
-  uint32_t icall;
+  uint64_t icall;
   uint16_t igrid;
-  uint8_t i3;
+  uint8_t i3, iflip;
 
   call[0] = 0;
   grid[0] = 0;
@@ -626,6 +627,25 @@ int unpack(uint8_t *message, char *call, char *grid)
     call[1] = c2[n % 36];
     n /= 36;
     call[0] = c1[n % 37];
+    trim(call);
+
+    return 1;
+  }
+
+  if(i3 == 4)
+  {
+    iflip = message[70];
+
+    if(iflip) return 0;
+
+    icall = 0;
+    for(i = 0; i < 58; ++i) icall |= message[69 - i] << i;
+    call[11] = 0;
+    for(i = 0; i < 11; ++i)
+    {
+      call[10 - i] = c0[icall % 38];
+      icall /= 38;
+    }
     trim(call);
 
     return 1;
