@@ -334,7 +334,7 @@ real_t window[NSPS], *map, llr[N];
 sync_t *list;
 uint8_t message[N];
 
-complex_t *in, *out;
+complex_t *buffer;
 PFFFT_Setup *setup;
 
 void sync()
@@ -344,17 +344,19 @@ void sync()
 
   for(i = 0; i < NSYM; ++i)
   {
+    memset(buffer, 0, sizeof(complex_t) * NFFT);
+
     for(j = 0; j < NSPS; ++j)
     {
-      in[j] = window[j] * signal[i * NSTP + j];
+      buffer[j] = window[j] * signal[i * NSTP + j];
     }
 
-    pffft_transform_ordered(setup, in, out, NULL, PFFFT_FORWARD);
+    pffft_transform_ordered(setup, buffer, buffer, NULL, PFFFT_FORWARD);
 
     for(j = 0; j < NFFT; ++j)
     {
       k = j < NFFT / 2 ? j + NFFT / 2 : j - NFFT / 2;
-      map[i * NFFT + k] = cabsf(out[j]);
+      map[i * NFFT + k] = cabsf(buffer[j]);
     }
   }
 
@@ -671,8 +673,7 @@ int main(int argc, char **argv)
   map = malloc(sizeof(real_t) * NSYM * NFFT);
   list = malloc(sizeof(sync_t) * NFFT);
 
-  in = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
-  out = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
+  buffer = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
   setup = pffft_new_setup(NFFT, PFFFT_COMPLEX);
 
   for(i = 0; i < NSPS; ++i)
@@ -682,8 +683,6 @@ int main(int argc, char **argv)
       a[2] * cosf(4.0 * M_PI * i / (NSPS - 1)) -
       a[3] * cosf(6.0 * M_PI * i / (NSPS - 1));
   }
-
-  memset(in, 0, sizeof(complex_t) * NFFT);
 
   fread(&dialfreq, 1, 8, fp);
 
