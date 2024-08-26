@@ -655,8 +655,8 @@ int main(int argc, char **argv)
   double dialfreq;
   int i, j, freq;
   sync_t *curr, *next, temp;
-  char call[12], grid[5];
-  real_t a[4] = {0.35875, 0.48829, 0.14128, 0.01168};
+  char *date, *time, *suffix, call[12], grid[5];
+  real_t dt, a[4] = {0.35875, 0.48829, 0.14128, 0.01168};
 
   if(argc != 2)
   {
@@ -668,6 +668,12 @@ int main(int argc, char **argv)
     fprintf(stderr, "Cannot open input file %s.\n", argv[1]);
     return EXIT_FAILURE;
   }
+
+  suffix = strstr(argv[1], ".c2");
+  *suffix = 0;
+  time = suffix - 4;
+  *(suffix - 5) = 0;
+  date = suffix - 11;
 
   signal = malloc(sizeof(complex_t) * 60000);
   map = malloc(sizeof(real_t) * NSYM * NFFT);
@@ -712,8 +718,9 @@ int main(int argc, char **argv)
 
       next->p = NULL;
 
-      freq = floor(dialfreq + j * 4.0e3 / NFFT - 2000 + 0.5);
-      printf("%1d %4d %4d %5.2f %3d %8d %6s %4s\n", i, curr->i, curr->j, curr->s, snr(curr), freq, call, grid);
+      dt = curr->j * NSTP / 4.0e3 - 0.5;
+      freq = floor(dialfreq + j * 4.0e3 / NFFT - 2.0e3 + 0.5);
+      printf("%6s %4s%02d %5.1f %3d %5.2f %8d %11s %4s\n", date, time, i * 15, curr->s, snr(curr), dt, freq, call, grid);
     }
   }
 
