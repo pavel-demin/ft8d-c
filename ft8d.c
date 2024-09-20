@@ -629,7 +629,7 @@ int unpack(char *call, char *grid)
     if(iflip) return 0;
 
     icall = 0;
-    for(i = 0; i < 58; ++i) icall |= message[69 - i] << i;
+    for(i = 0; i < 58; ++i) icall |= (uint64_t)message[69 - i] << i;
     call[11] = 0;
     for(i = 0; i < 11; ++i)
     {
