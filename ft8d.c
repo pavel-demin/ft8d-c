@@ -28,14 +28,14 @@ typedef struct SYNC sync_t;
 #define N 174
 #define M 83
 
-#define NSTP 128
+#define NSTP 64
 #define NSPS 1600
 #define NFFT 3200
 
-#define NSSY 5
+#define NSSY 10
 #define NFOS 5
 
-#define NSYM (93 * NSSY)
+#define NSYM (60000 / NSTP)
 
 #define NTOKENS 2063592
 #define MAX22 4194304
