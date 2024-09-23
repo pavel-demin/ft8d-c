@@ -363,7 +363,7 @@ void sync()
   {
     jmax = 0;
     smax = 0;
-    for(j = -7 * NSSY; j < 21 * NSSY; ++j)
+    for(j = -10 * NSSY; j < 25 * NSSY; ++j)
     {
       memset(sum, 0, sizeof(sum));
       for(k = 0; k < 7; ++k)
