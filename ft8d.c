@@ -14,9 +14,8 @@ typedef float real_t;
 
 struct SYNC
 {
-  int i, j;
+  int i, j, k;
   real_t s;
-  real_t *p;
 };
 
 typedef struct SYNC sync_t;
@@ -382,15 +381,15 @@ void sync()
     }
     list[i].i = i;
     list[i].j = jmax;
+    list[i].k = 1;
     list[i].s = smax;
-    list[i].p = map + jmax * NFFT + i;
   }
 
   for(i = 2; i < NFFT - 2; ++i)
   {
     if((list[i - 2].s > list[i].s && list[i - 1].s > list[i].s) || (list[i + 1].s > list[i].s && list[i + 2].s > list[i].s))
     {
-      list[i].p = NULL;
+      list[i].k = 0;
     }
   }
 }
@@ -405,18 +404,19 @@ real_t max(real_t a, real_t b, real_t c, real_t d)
 
 void process(sync_t *cand)
 {
-  int i, j, k, l;
-  real_t s[8], sum[2], var, sig;
+  int i, j, k, l, m;
+  real_t s[8], d, sum, avg, sig;
 
   for(i = 0; i < 2; ++i)
   {
     for(j = 0; j < 29; ++j)
     {
-      k = (i * 36 + j + 7) * NSSY * NFFT;
+      k = cand->j * NFFT + cand->i + (i * 36 + j + 7) * NSSY * NFFT;
 
       for(l = 0; l < 8; ++l)
       {
-        s[l] = log10f(1e-32 + cand->p[k + graymap[l] * NFOS]);
+        m = k + graymap[l] * NFOS;
+        s[l] = (m >= 0 && m < NSYM * NFFT) ? map[m] > 0 ? log10f(map[m]) : -10 : -10;
       }
 
       k = i * 87 + j * 3;
@@ -427,15 +427,20 @@ void process(sync_t *cand)
     }
   }
 
-  memset(sum, 0, sizeof(sum));
+  sum = 0;
   for(i = 0; i < N; ++i)
   {
-    sum[0] += llr[i];
-    sum[1] += llr[i] * llr[i];
+    sum += llr[i];
   }
-  var = (sum[1] - sum[0] * sum[0] / N) / N;
-  sig = var > 0 ? sqrtf(var) : sqrtf(sum[1] / N);
-  sig /= 4;
+  avg = sum / N;
+
+  sum = 0;
+  for(i = 0; i < N; ++i)
+  {
+    d = llr[i] - avg;
+    sum += d * d;
+  }
+  sig = sqrtf(sum / (N - 1)) / 4;
 
   for(i = 0; i < N; ++i)
   {
@@ -449,7 +454,7 @@ int check()
   uint8_t poly[15] = {1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1 };
   uint8_t data[96] = {0};
 
-  for(i = 0; i < 77; ++i) data[i] = message[i];
+  memcpy(data, message, 77);
 
   for(i = 0; i < 82; ++i)
   {
@@ -457,14 +462,14 @@ int check()
     {
       for(j = 0; j < 15; ++j)
       {
-        data[i + j] = (data[i + j] + poly[j]) % 2;
+        data[i + j] ^= poly[j];
       }
     }
   }
 
   for(i = 0; i < 14; ++i)
   {
-    if(data[82+i] != message[77 + i]) return 0;
+    if(data[82 + i] != message[77 + i]) return 0;
   }
 
   return 1;
@@ -703,9 +708,9 @@ int main(int argc, char **argv)
       curr = &list[j];
       next = &list[j + 1];
 
-      if(curr->p == NULL || curr->s < 3.0) continue;
+      if(curr->k == 0 || curr->s < 3.0) continue;
 
-      if(next->p != NULL && next->s > curr->s)
+      if(next->k != 0 && next->s > curr->s)
       {
         temp = *curr;
         *curr = *next;
@@ -716,7 +721,7 @@ int main(int argc, char **argv)
 
       if(!decode(30) || !unpack(call, grid)) continue;
 
-      next->p = NULL;
+      next->k = 0;
 
       dt = curr->j * NSTP / 4.0e3 - 0.5;
       freq = floor(dialfreq + j * 4.0e3 / NFFT - 2.0e3 + 0.5);
