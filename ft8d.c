@@ -15,7 +15,7 @@ typedef float real_t;
 struct SYNC
 {
   int i, j, k;
-  real_t s;
+  real_t r, s;
 };
 
 typedef struct SYNC sync_t;
@@ -339,7 +339,7 @@ PFFFT_Setup *setup;
 void sync()
 {
   int i, j, k, m, n, jmax;
-  real_t sum[2], s, smax;
+  real_t c, sum, r, rmax, s, smax;
 
   for(i = 0; i < NSYM; ++i)
   {
@@ -362,26 +362,34 @@ void sync()
   for(i = 0; i < NFFT; ++i)
   {
     jmax = 0;
+    rmax = 0;
     smax = 0;
     for(j = -10 * NSSY; j < 25 * NSSY; ++j)
     {
-      memset(sum, 0, sizeof(sum));
+      r = 0;
+      s = 0;
       for(k = 0; k < 7; ++k)
       {
         m = j + (k + 36) * NSSY;
-        for(n = 0; n < 8; ++n) sum[0] += map[m * NFFT + i + n * NFOS];
-        sum[1] += map[m * NFFT + i + costas[k] * NFOS];
+        sum = 0;
+        for(n = 0; n < 8; ++n) sum += map[m * NFFT + i + n * NFOS];
+        c = map[m * NFFT + i + costas[k] * NFOS];
+        r += 7 * c / (sum - c);
+        s += 8 * c / sum;
       }
-      s = 7 * sum[1] / (sum[0] - sum[1]);
+      r /= 7;
+      s /= 7;
       if(smax < s)
       {
         jmax = j;
+        rmax = r;
         smax = s;
       }
     }
     list[i].i = i;
     list[i].j = jmax;
     list[i].k = 1;
+    list[i].r = rmax;
     list[i].s = smax;
   }
 
@@ -478,7 +486,7 @@ int check()
 int decode(int iterations)
 {
   int i, j, k, l, iter, ibj, ichk, current, previous, counter;
-  real_t x, x2, tnm, tmn, tov[N][3], toc[M][7], zn[N];
+  real_t x, x2, tnm, tmn, tov[N][3], toc[M][7], zn;
 
   memset(tov, 0, sizeof(tov));
 
@@ -496,9 +504,9 @@ int decode(int iterations)
   {
     for(i = 0; i < N; ++i)
     {
-      zn[i] = llr[i];
-      for(j = 0; j < ncw; ++j) zn[i] += tov[i][j];
-      message[i] = zn[i] > 0;
+      zn = llr[i];
+      for(j = 0; j < ncw; ++j) zn += tov[i][j];
+      message[i] = zn > 0;
     }
 
     current = 0;
@@ -651,7 +659,7 @@ int unpack(char *call, char *grid)
 
 int snr(sync_t *cand)
 {
-  return floor(20.0 * log10f(1e-32 + cand->s) - 26 + 0.5);
+  return floor(20.0 * log10f(1e-32 + cand->r) - 26 + 0.5);
 }
 
 int main(int argc, char **argv)
@@ -708,7 +716,7 @@ int main(int argc, char **argv)
       curr = &list[j];
       next = &list[j + 1];
 
-      if(curr->k == 0 || curr->s < 3.0) continue;
+      if(curr->k == 0 || curr->s < 2.5) continue;
 
       if(next->k != 0 && next->s > curr->s)
       {
@@ -724,7 +732,7 @@ int main(int argc, char **argv)
       next->k = 0;
 
       dt = curr->j * NSTP / 4.0e3 - 0.5;
-      freq = floor(dialfreq + j * 4.0e3 / NFFT - 2.0e3 + 0.5);
+      freq = floor(dialfreq + curr->i * 4.0e3 / NFFT - 2.0e3 + 0.5);
       printf("%6s %4s%02d %5.1f %3d %5.2f %8d %11s %4s\n", date, time, i * 15, curr->s, snr(curr), dt, freq, call, grid);
     }
   }
