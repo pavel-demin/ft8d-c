@@ -338,7 +338,7 @@ PFFFT_Setup *setup;
 
 void sync()
 {
-  int i, j, k, m, n, jmax;
+  int i, j, k, m, n, jmax, jstp;
   real_t c, sum, r, rmax, s, smax;
 
   for(i = 0; i < NSYM; ++i)
@@ -359,12 +359,15 @@ void sync()
     }
   }
 
+  jstp = 5;
+
   for(i = 0; i < NFFT; ++i)
   {
     jmax = 0;
     rmax = 0;
     smax = 0;
-    for(j = -10 * NSSY; j < 25 * NSSY; ++j)
+
+    for(j = -10 * NSSY; j < 25 * NSSY; j += jstp)
     {
       r = 0;
       s = 0;
@@ -379,13 +382,37 @@ void sync()
       }
       r /= 7;
       s /= 7;
-      if(smax < s)
+
+      if(s > smax)
+      {
+        smax = s;
+        rmax = r;
+        jmax = j;
+      }
+    }
+
+    for(j = jmax - jstp; j <= jmax + jstp; ++j)
+    {
+      r = s = 0;
+      for(k = 0; k < 7; ++k)
+      {
+        m = j + (k + 36) * NSSY;
+        sum = 0.0;
+        for(n = 0; n < 8; ++n) sum += map[m * NFFT + i + n * NFOS];
+        c = map[m * NFFT + i + costas[k] * NFOS];
+        r += 7 * c / (sum - c);
+        s += 8 * c / sum;
+      }
+      r /= 7;
+      s /= 7;
+      if(s > smax)
       {
         jmax = j;
         rmax = r;
         smax = s;
       }
     }
+
     list[i].i = i;
     list[i].j = jmax;
     list[i].k = 1;
@@ -716,7 +743,7 @@ int main(int argc, char **argv)
       curr = &list[j];
       next = &list[j + 1];
 
-      if(curr->k == 0 || curr->s < 2.5) continue;
+      if(curr->k == 0 || curr->s < 2.0) continue;
 
       if(next->k != 0 && next->s > curr->s)
       {
