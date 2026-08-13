@@ -330,6 +330,10 @@ char c4[27] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 complex_t *signal;
 real_t window[NSPS], *map, llr[N];
+
+int cpos[N][3];
+int p2[M][7];
+
 sync_t *list;
 uint8_t message[N];
 
@@ -512,8 +516,8 @@ int check()
 
 int decode(int iterations)
 {
-  int i, j, k, l, iter, ibj, ichk, current, previous, counter;
-  real_t x, x2, tnm, tmn, tov[N][3], toc[M][7], zn;
+  int i, j, k, l, iter, ibj, current, previous, counter;
+  real_t x, x2, tnm, tov[N][3], toc[M][7], zn, pre[8], suf[8];
 
   memset(tov, 0, sizeof(tov));
 
@@ -555,41 +559,28 @@ int decode(int iterations)
 
     previous = current;
 
-    for(i = 0; i < M; ++i)
+    for(ibj = 0; ibj < N; ++ibj)
     {
-      for(j = 0; j < nrw[i]; ++j)
+      tnm = llr[ibj] + tov[ibj][0] + tov[ibj][1] + tov[ibj][2];
+      for(k = 0; k < 3; ++k)
       {
-        ibj = nm[i][j];
-        tnm = llr[ibj];
-        for(k = 0; k < ncw; ++k)
-        {
-          if(mn[ibj][k] != i)
-          {
-            tnm += tov[ibj][k];
-          }
-        }
-        x = -tnm / 2;
+        x = (tov[ibj][k] - tnm) * 0.5;
         x2 = x * x;
-        toc[i][j] = x > 3.64 ? 1 : x < -3.64 ? -1 : (945 + (105 + x2) * x2) * x / (945 + (420 + 15 * x2) * x2);
+        toc[mn[ibj][k]][cpos[ibj][k]] = x > 3.64 ? 1 : x < -3.64 ? -1 : (945 + (105 + x2) * x2) * x / (945 + (420 + 15 * x2) * x2);
       }
     }
 
-    for(i = 0; i < N; ++i)
+    for(i = 0; i < M; ++i)
     {
-      for(j = 0; j < ncw; ++j)
+      pre[0] = 1;
+      for(j = 0; j < nrw[i]; ++j) pre[j + 1] = pre[j] * toc[i][j];
+      suf[nrw[i]] = 1;
+      for(j = nrw[i] - 1; j >= 0; --j) suf[j] = suf[j + 1] * toc[i][j];
+      for(j = 0; j < nrw[i]; ++j)
       {
-        ichk = mn[i][j];
-        tmn = 1;
-        for(k = 0; k < nrw[ichk]; ++k)
-        {
-          if(nm[ichk][k] != i)
-          {
-            tmn *= toc[ichk][k];
-          }
-        }
-        x = -tmn;
+        x = -pre[j] * suf[j + 1];
         x2 = x * x;
-        tov[i][j] = 2 * (945 - (735 - 64 * x2) * x2) * x / (945 - (1050 - 225 * x2) * x2);
+        tov[nm[i][j]][p2[i][j]] = 2 * (945 - (735 - 64 * x2) * x2) * x / (945 - (1050 - 225 * x2) * x2);
       }
     }
   }
@@ -693,7 +684,7 @@ int main(int argc, char **argv)
 {
   FILE *fp;
   double dialfreq;
-  int i, j, freq;
+  int i, j, k, ibj, freq;
   sync_t *curr, *next, temp;
   char *date, *time, *suffix, call[12], grid[5];
   real_t dt, a[4] = {0.35875, 0.48829, 0.14128, 0.01168};
@@ -718,6 +709,38 @@ int main(int argc, char **argv)
   signal = malloc(sizeof(complex_t) * 60000);
   map = malloc(sizeof(real_t) * NSYM * NFFT);
   list = malloc(sizeof(sync_t) * NFFT);
+
+  for(ibj = 0; ibj < N; ++ibj)
+  {
+    for(k = 0; k < 3; ++k)
+    {
+      i = mn[ibj][k];
+      for(j = 0; j < nrw[i]; ++j)
+      {
+        if(nm[i][j] == ibj)
+        {
+          cpos[ibj][k] = j;
+          break;
+        }
+      }
+    }
+  }
+
+  for(i = 0; i < M; ++i)
+  {
+    for(j = 0; j < nrw[i]; ++j)
+    {
+      ibj = nm[i][j];
+      for(k = 0; k < 3; ++k)
+      {
+        if(mn[ibj][k] == i)
+        {
+          p2[i][j] = k;
+          break;
+        }
+      }
+    }
+  }
 
   buffer = pffft_aligned_malloc(sizeof(complex_t) * NFFT);
   setup = pffft_new_setup(NFFT, PFFFT_COMPLEX);
