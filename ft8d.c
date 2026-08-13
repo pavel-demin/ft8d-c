@@ -342,7 +342,7 @@ PFFFT_Setup *setup;
 
 void sync()
 {
-  int i, j, k, m, n, jmax, jstp;
+  int i, j, k, m, n, idx, jmax, jstp;
   real_t c, sum, r, rmax, s, smax;
 
   for(i = 0; i < NSYM; ++i)
@@ -351,7 +351,8 @@ void sync()
 
     for(j = 0; j < NSPS; ++j)
     {
-      buffer[j] = window[j] * signal[i * NSTP + j];
+      idx = i * NSTP + j;
+      buffer[j] = idx < 60000 ? window[j] * signal[idx] : 0;
     }
 
     pffft_transform_ordered(setup, (float *)buffer, (float *)buffer, NULL, PFFFT_FORWARD);
