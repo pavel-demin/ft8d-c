@@ -777,7 +777,7 @@ int main(int argc, char **argv)
 
       process(curr);
 
-      if(!decode(30) || !unpack(call, grid)) continue;
+      if(!decode(curr->s < 2.5 ? 20 : 30) || !unpack(call, grid)) continue;
 
       next->k = 0;
 
