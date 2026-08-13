@@ -34,12 +34,19 @@ typedef struct SYNC sync_t;
 #define NSSY 10
 #define NFOS 5
 
-#define NSYM (60000 / NSTP)
+#define NSAMP 60000
+#define NSYM (NSAMP / NSTP)
 
 #define NTOKENS 2063592
 #define MAX22 4194304
 
 #define MAXGRID 32400
+
+#define SYNC_MIN 2.0
+#define SYNC_ITER_CAP 2.5
+
+#define LDPC_ITER_LOW 20
+#define LDPC_ITER_FULL 30
 
 uint8_t mn[N][3] =
 {
@@ -340,10 +347,30 @@ uint8_t message[N];
 complex_t *buffer;
 PFFFT_Setup *setup;
 
-void sync()
+static inline void sync_metric(int i, int j, real_t *r, real_t *s)
 {
-  int i, j, k, m, n, idx, jmax, jstp;
-  real_t c, sum, r, rmax, s, smax;
+  int k, m, n;
+  real_t c, sum;
+
+  *r = 0;
+  *s = 0;
+  for(k = 0; k < 7; ++k)
+  {
+    m = j + (k + 36) * NSSY;
+    sum = 0;
+    for(n = 0; n < 8; ++n) sum += map[m * NFFT + i + n * NFOS];
+    c = map[m * NFFT + i + costas[k] * NFOS];
+    *r += 7 * c / (sum - c);
+    *s += 8 * c / sum;
+  }
+  *r /= 7;
+  *s /= 7;
+}
+
+static void sync()
+{
+  int i, j, k, idx, jmax, jstp;
+  real_t r, rmax, s, smax;
 
   for(i = 0; i < NSYM; ++i)
   {
@@ -352,7 +379,7 @@ void sync()
     for(j = 0; j < NSPS; ++j)
     {
       idx = i * NSTP + j;
-      buffer[j] = idx < 60000 ? window[j] * signal[idx] : 0;
+      buffer[j] = idx < NSAMP ? window[j] * signal[idx] : 0;
     }
 
     pffft_transform_ordered(setup, (float *)buffer, (float *)buffer, NULL, PFFFT_FORWARD);
@@ -374,42 +401,20 @@ void sync()
 
     for(j = -10 * NSSY; j < 25 * NSSY; j += jstp)
     {
-      r = 0;
-      s = 0;
-      for(k = 0; k < 7; ++k)
-      {
-        m = j + (k + 36) * NSSY;
-        sum = 0;
-        for(n = 0; n < 8; ++n) sum += map[m * NFFT + i + n * NFOS];
-        c = map[m * NFFT + i + costas[k] * NFOS];
-        r += 7 * c / (sum - c);
-        s += 8 * c / sum;
-      }
-      r /= 7;
-      s /= 7;
+      sync_metric(i, j, &r, &s);
 
       if(s > smax)
       {
-        smax = s;
-        rmax = r;
         jmax = j;
+        rmax = r;
+        smax = s;
       }
     }
 
     for(j = jmax - jstp; j <= jmax + jstp; ++j)
     {
-      r = s = 0;
-      for(k = 0; k < 7; ++k)
-      {
-        m = j + (k + 36) * NSSY;
-        sum = 0.0;
-        for(n = 0; n < 8; ++n) sum += map[m * NFFT + i + n * NFOS];
-        c = map[m * NFFT + i + costas[k] * NFOS];
-        r += 7 * c / (sum - c);
-        s += 8 * c / sum;
-      }
-      r /= 7;
-      s /= 7;
+      sync_metric(i, j, &r, &s);
+
       if(s > smax)
       {
         jmax = j;
@@ -434,7 +439,7 @@ void sync()
   }
 }
 
-real_t max(real_t a, real_t b, real_t c, real_t d)
+static inline real_t max(real_t a, real_t b, real_t c, real_t d)
 {
   real_t x, y;
   x = a > b ? a : b;
@@ -442,9 +447,14 @@ real_t max(real_t a, real_t b, real_t c, real_t d)
   return x > y ? x : y;
 }
 
-void process(sync_t *cand)
+static inline real_t tone_llr(int m)
 {
-  int i, j, k, l, m;
+  return (m >= 0 && m < NSYM * NFFT && map[m] > 0) ? log10f(map[m]) : -10;
+}
+
+static void process(sync_t *cand)
+{
+  int i, j, k, l;
   real_t s[8], d, sum, avg, sig;
 
   for(i = 0; i < 2; ++i)
@@ -455,8 +465,7 @@ void process(sync_t *cand)
 
       for(l = 0; l < 8; ++l)
       {
-        m = k + graymap[l] * NFOS;
-        s[l] = (m >= 0 && m < NSYM * NFFT) ? map[m] > 0 ? log10f(map[m]) : -10 : -10;
+        s[l] = tone_llr(k + graymap[l] * NFOS);
       }
 
       k = i * 87 + j * 3;
@@ -488,7 +497,7 @@ void process(sync_t *cand)
   }
 }
 
-int check()
+static int check()
 {
   int i, j;
   uint8_t poly[15] = {1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1 };
@@ -515,10 +524,24 @@ int check()
   return 1;
 }
 
-int decode(int iterations)
+static inline real_t tanh_approx(real_t x)
+{
+  real_t x2 = x * x;
+
+  return x > 3.64 ? 1 : x < -3.64 ? -1 : (945 + (105 + x2) * x2) * x / (945 + (420 + 15 * x2) * x2);
+}
+
+static inline real_t atanh_approx(real_t x)
+{
+  real_t x2 = x * x;
+
+  return (945 - (735 - 64 * x2) * x2) * x / (945 - (1050 - 225 * x2) * x2);
+}
+
+static int decode(int iterations)
 {
   int i, j, k, l, iter, ibj, current, previous, counter;
-  real_t x, x2, tnm, tov[N][3], toc[M][7], zn, pre[8], suf[8];
+  real_t x, tnm, tov[N][3], toc[M][7], zn, pre[8], suf[8];
 
   memset(tov, 0, sizeof(tov));
 
@@ -566,8 +589,7 @@ int decode(int iterations)
       for(k = 0; k < 3; ++k)
       {
         x = (tov[ibj][k] - tnm) * 0.5;
-        x2 = x * x;
-        toc[mn[ibj][k]][cpos[ibj][k]] = x > 3.64 ? 1 : x < -3.64 ? -1 : (945 + (105 + x2) * x2) * x / (945 + (420 + 15 * x2) * x2);
+        toc[mn[ibj][k]][cpos[ibj][k]] = tanh_approx(x);
       }
     }
 
@@ -580,8 +602,7 @@ int decode(int iterations)
       for(j = 0; j < nrw[i]; ++j)
       {
         x = -pre[j] * suf[j + 1];
-        x2 = x * x;
-        tov[nm[i][j]][p2[i][j]] = 2 * (945 - (735 - 64 * x2) * x2) * x / (945 - (1050 - 225 * x2) * x2);
+        tov[nm[i][j]][p2[i][j]] = 2 * atanh_approx(x);
       }
     }
   }
@@ -589,7 +610,7 @@ int decode(int iterations)
   return 0;
 }
 
-void trim(char *s)
+static void trim(char *s)
 {
   char *p = s;
   int l = strlen(p);
@@ -600,7 +621,7 @@ void trim(char *s)
   memmove(s, p, l + 1);
 }
 
-int unpack(char *call, char *grid)
+static int unpack(char *call, char *grid)
 {
   int i, n;
   uint64_t icall;
@@ -676,7 +697,7 @@ int unpack(char *call, char *grid)
   return 0;
 }
 
-int snr(sync_t *cand)
+static int snr(sync_t *cand)
 {
   return floor(20.0 * log10f(1e-32 + cand->r) - 26 + 0.5);
 }
@@ -707,7 +728,7 @@ int main(int argc, char **argv)
   *(suffix - 5) = 0;
   date = suffix - 11;
 
-  signal = malloc(sizeof(complex_t) * 60000);
+  signal = malloc(sizeof(complex_t) * NSAMP);
   map = malloc(sizeof(real_t) * NSYM * NFFT);
   list = malloc(sizeof(sync_t) * NFFT);
 
@@ -758,7 +779,7 @@ int main(int argc, char **argv)
 
   for(i = 0; i < 4; ++i)
   {
-    fread(signal, 1, 480000, fp);
+    fread(signal, 1, sizeof(complex_t) * NSAMP, fp);
 
     sync();
 
@@ -767,7 +788,7 @@ int main(int argc, char **argv)
       curr = &list[j];
       next = &list[j + 1];
 
-      if(curr->k == 0 || curr->s < 2.0) continue;
+      if(curr->k == 0 || curr->s < SYNC_MIN) continue;
 
       if(next->k != 0 && next->s > curr->s)
       {
@@ -778,7 +799,7 @@ int main(int argc, char **argv)
 
       process(curr);
 
-      if(!decode(curr->s < 2.5 ? 20 : 30) || !unpack(call, grid)) continue;
+      if(!decode(curr->s < SYNC_ITER_CAP ? LDPC_ITER_LOW : LDPC_ITER_FULL) || !unpack(call, grid)) continue;
 
       next->k = 0;
 
