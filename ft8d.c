@@ -350,7 +350,7 @@ void sync()
       buffer[j] = window[j] * signal[i * NSTP + j];
     }
 
-    pffft_transform_ordered(setup, buffer, buffer, NULL, PFFFT_FORWARD);
+    pffft_transform_ordered(setup, (float *)buffer, (float *)buffer, NULL, PFFFT_FORWARD);
 
     for(j = 0; j < NFFT; ++j)
     {
