@@ -194,6 +194,39 @@ static void sync()
   }
 }
 
+static int count_costas(sync_t *cand)
+{
+  int i, j, m, n, nmax, result;
+  real_t v, vmax;
+
+  result = 0;
+
+  for(i = 0; i < 3; ++i)
+  {
+    for(j = 0; j < 7; ++j)
+    {
+      m = cand->j + (i * 36 + j) * NSSY;
+
+      if(m < 0 || m >= NSYM) continue;
+
+      vmax = -1;
+      nmax = -1;
+
+      for(n = 0; n < 8; ++n)
+      {
+        v = map[m * NFFT + cand->i + n * NFOS];
+        if(v > vmax)
+        {
+          vmax = v;
+          nmax = n;
+        }
+      }
+      if(nmax == costas[j]) ++result;
+    }
+  }
+  return result;
+}
+
 /*
  * Symbol stage: log-likelihood ratios from the tone amplitudes.
  */
@@ -572,6 +605,8 @@ int main(int argc, char **argv)
         *curr = *next;
         *next = temp;
       }
+
+      if(count_costas(curr) < 6) continue;
 
       process(curr);
 
